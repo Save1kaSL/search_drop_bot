@@ -21,7 +21,12 @@ from aiogram.types import (
     ReplyKeyboardRemove,
 )
 
-from bot.banks_loader import build_link, load_banks
+from bot.offers_loader import (
+    OfferKind,
+    build_link,
+    load_offers,
+    offer_button_label,
+)
 from bot.config import AgSearchBy, Mode, rko_group_api_key
 from bot.excel_parse import filter_ag, filter_cpa_by_sub1, read_excel_bytes
 from bot.rko_partner import get_rko_request_info
@@ -31,7 +36,8 @@ log = logging.getLogger(__name__)
 router = Router()
 
 CHANGE_MODE_BTN = "Сменить режим"
-LINKS_BTN = "Получить ссылку"
+LINKS_BTN = "Ссылки банки"
+MFO_LINKS_BTN = "Ссылки МФО"
 
 
 class Form(StatesGroup):
@@ -77,18 +83,18 @@ def session_reply_keyboard(*, mode: Mode, ag_by: AgSearchBy | None) -> ReplyKeyb
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=CHANGE_MODE_BTN)],
-            [KeyboardButton(text=LINKS_BTN)],
+            [KeyboardButton(text=LINKS_BTN), KeyboardButton(text=MFO_LINKS_BTN)],
         ],
         resize_keyboard=True,
         input_field_placeholder=ph,
     )
 
 
-def links_only_reply_keyboard() -> ReplyKeyboardMarkup:
+def links_menu_reply_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=LINKS_BTN)]],
+        keyboard=[[KeyboardButton(text=LINKS_BTN), KeyboardButton(text=MFO_LINKS_BTN)]],
         resize_keyboard=True,
-        input_field_placeholder="Потом выберешь банк",
+        input_field_placeholder="Выбери банк или МФО",
     )
 
 
@@ -108,46 +114,111 @@ def _is_links_btn(text: str) -> bool:
     return text.strip().casefold() == LINKS_BTN.casefold()
 
 
+def _is_mfo_links_btn(text: str) -> bool:
+    return text.strip().casefold() == MFO_LINKS_BTN.casefold()
+
+
 class LinksButtonFilter(BaseFilter):
     async def __call__(self, message: Message) -> bool:
         return _is_links_btn(message.text or "")
 
 
-def _bank_choice_markup(banks: list[dict[str, str]]) -> InlineKeyboardMarkup:
+class MfoLinksButtonFilter(BaseFilter):
+    async def __call__(self, message: Message) -> bool:
+        return _is_mfo_links_btn(message.text or "")
+
+
+def _offer_choice_markup(offers: list[dict[str, str]], kind: OfferKind) -> InlineKeyboardMarkup:
+    prefix = "b" if kind == "bank" else "m"
     rows: list[list[InlineKeyboardButton]] = []
-    for i, b in enumerate(banks):
-        label = b["name"]
-        if len(label) > 64:
-            label = label[:61] + "..."
-        rows.append([InlineKeyboardButton(text=label, callback_data=f"lnk:{i}")])
+    for i, offer in enumerate(offers):
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=offer_button_label(offer),
+                    callback_data=f"lnk:{prefix}:{i}",
+                )
+            ]
+        )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def _show_bank_picker(message: Message) -> None:
-    banks = load_banks()
-    if not banks:
-        await message.answer(
-            "Список банков пуст. Создай файл <code>banks.json</code> рядом с ботом "
-            "(скопируй <code>banks.example.json</code> → <code>banks.json</code> и заполни).",
-            parse_mode="HTML",
-        )
-        return
-    await message.answer("Выбери банк:", reply_markup=_bank_choice_markup(banks))
-
-
-async def show_links_flow(message: Message, state: FSMContext) -> None:
-    """Сброс ввода Sub1 для ссылки (если был) и показ инлайн банков."""
+async def _clear_pending_link_input(state: FSMContext) -> None:
     cur = await state.get_state()
-    if cur == Form.waiting_sub1_for_link.state:
-        data = await state.get_data()
-        restore = data.get("_restore_state_after_link")
-        await state.update_data(
-            link_bank_idx=None,
-            link_bank_name=None,
-            _restore_state_after_link=None,
+    if cur != Form.waiting_sub1_for_link.state:
+        return
+    data = await state.get_data()
+    restore = data.get("_restore_state_after_link")
+    await state.update_data(
+        link_kind=None,
+        link_idx=None,
+        link_name=None,
+        link_rate=None,
+        _restore_state_after_link=None,
+    )
+    await state.set_state(restore)
+
+
+async def show_offer_links_flow(message: Message, state: FSMContext, kind: OfferKind) -> None:
+    await _clear_pending_link_input(state)
+    offers = load_offers(kind)
+    if not offers:
+        if kind == "bank":
+            hint = (
+                "Список банков пуст. Заполни <code>banks.json</code> "
+                "(см. <code>banks.example.json</code>): name, rate, url_template с <code>{sub1}</code>."
+            )
+            title = "Выбери банк:"
+        else:
+            hint = (
+                "Список МФО пуст. Заполни <code>mfo.json</code> "
+                "(см. <code>mfo.example.json</code>): name, rate, url_template с <code>{sub1}</code>."
+            )
+            title = "Выбери МФО:"
+        await message.answer(hint, parse_mode="HTML")
+        return
+    title = "Выбери банк:" if kind == "bank" else "Выбери МФО:"
+    await message.answer(title, reply_markup=_offer_choice_markup(offers, kind))
+
+
+async def _reply_kb_after_link(state: FSMContext) -> ReplyKeyboardMarkup:
+    st = await state.get_state()
+    sdata = await state.get_data()
+    mode = sdata.get("mode")
+    if st == Form.in_session.state and mode in ("cpa", "ag"):
+        ag_b = sdata.get("ag_by") if mode == "ag" else None
+        return session_reply_keyboard(
+            mode=mode,
+            ag_by=ag_b if ag_b in ("inn", "surname") else None,
         )
-        await state.set_state(restore)
-    await _show_bank_picker(message)
+    if st == Form.ag_pick_field.state and mode == "ag":
+        return session_reply_keyboard(mode="ag", ag_by=None)
+    return links_menu_reply_keyboard()
+
+
+async def _send_built_link(
+    message: Message,
+    state: FSMContext,
+    *,
+    kind: OfferKind,
+    name: str,
+    rate: str,
+    sub1: str,
+    url: str,
+) -> None:
+    kind_human = "Банк" if kind == "bank" else "МФО"
+    esc_url = html.escape(url, quote=True)
+    esc_name = html.escape(name, quote=False)
+    esc_sub = html.escape(sub1, quote=False)
+    rate_block = f"Ставка: <b>{html.escape(rate, quote=False)}</b>\n" if rate.strip() else ""
+    await message.answer(
+        f"{kind_human}: <b>{esc_name}</b>\n{rate_block}"
+        f"Sub1: <code>{esc_sub}</code>\n\n"
+        f'<a href="{esc_url}">Открыть ссылку</a>\n<code>{esc_url}</code>',
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=await _reply_kb_after_link(state),
+    )
 
 
 @router.message(CommandStart())
@@ -158,16 +229,16 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         "<b>AG</b> — загрузи таблицу, выбери в инлайн поиск <b>по ИНН</b> или <b>по фамилии</b>, "
         "потом вводи значения подряд.\n"
         "Одиночная заявка из ЛК по API: <code>/rko ID</code> (нужен ключ в .env).\n"
-        f"Партнёрские ссылки: кнопка «{html.escape(LINKS_BTN)}» или <code>/links</code> "
-        "(список банков в <code>banks.json</code>).\n"
+        f"Ссылки: «{html.escape(LINKS_BTN)}» / «{html.escape(MFO_LINKS_BTN)}» "
+        "(<code>banks.json</code>, <code>mfo.json</code>).\n"
         f"Смена режима / новый тип поиска — «{html.escape(CHANGE_MODE_BTN)}» или новый файл.",
         reply_markup=ReplyKeyboardRemove(),
         parse_mode="HTML",
     )
     await message.answer("Выбери режим:", reply_markup=mode_keyboard())
     await message.answer(
-        f"Ссылки: кнопка «{html.escape(LINKS_BTN)}» или <code>/links</code>.",
-        reply_markup=links_only_reply_keyboard(),
+        f"Ссылки: «{html.escape(LINKS_BTN)}» или «{html.escape(MFO_LINKS_BTN)}».",
+        reply_markup=links_menu_reply_keyboard(),
         parse_mode="HTML",
     )
 
@@ -268,28 +339,40 @@ async def on_link_sub1(message: Message, state: FSMContext) -> None:
         await message.answer("Режим сброшен.", reply_markup=ReplyKeyboardRemove())
         await message.answer("Выбери режим:", reply_markup=mode_keyboard())
         await message.answer(
-            f"Ссылки: «{html.escape(LINKS_BTN)}» или <code>/links</code>.",
-            reply_markup=links_only_reply_keyboard(),
+            f"Ссылки: «{html.escape(LINKS_BTN)}» / «{html.escape(MFO_LINKS_BTN)}».",
+            reply_markup=links_menu_reply_keyboard(),
             parse_mode="HTML",
         )
         return
     if _is_links_btn(raw):
-        await show_links_flow(message, state)
+        await show_offer_links_flow(message, state, "bank")
+        return
+    if _is_mfo_links_btn(raw):
+        await show_offer_links_flow(message, state, "mfo")
         return
 
     data = await state.get_data()
-    idx = data.get("link_bank_idx")
-    name = data.get("link_bank_name") or "—"
+    kind = data.get("link_kind")
+    idx = data.get("link_idx")
+    name = str(data.get("link_name") or "—")
+    rate = str(data.get("link_rate") or "")
     restore = data.get("_restore_state_after_link")
-    banks = load_banks()
-    if not isinstance(idx, int) or idx < 0 or idx >= len(banks):
+    if kind not in ("bank", "mfo"):
+        await state.set_state(restore)
+        await message.answer("Сессия ссылки сброшена. Выбери банк или МФО снова.")
+        return
+
+    offers = load_offers(kind)  # type: ignore[arg-type]
+    if not isinstance(idx, int) or idx < 0 or idx >= len(offers):
         await state.update_data(
-            link_bank_idx=None,
-            link_bank_name=None,
+            link_kind=None,
+            link_idx=None,
+            link_name=None,
+            link_rate=None,
             _restore_state_after_link=None,
         )
         await state.set_state(restore)
-        await message.answer("Сессия ссылки сброшена. Нажми /links снова.")
+        await message.answer("Сессия ссылки сброшена. Выбери банк или МФО снова.")
         return
 
     sub1 = raw.strip()
@@ -297,78 +380,82 @@ async def on_link_sub1(message: Message, state: FSMContext) -> None:
         await message.answer("Введи непустой <b>Sub1</b>.", parse_mode="HTML")
         return
 
-    tpl = banks[idx]["url_template"]
-    url = build_link(tpl, sub1)
+    url = build_link(offers[idx]["url_template"], sub1)
     await state.update_data(
-        link_bank_idx=None,
-        link_bank_name=None,
+        link_kind=None,
+        link_idx=None,
+        link_name=None,
+        link_rate=None,
         _restore_state_after_link=None,
     )
     await state.set_state(restore)
 
-    esc_url = html.escape(url, quote=True)
-    esc_name = html.escape(str(name), quote=False)
-    esc_sub = html.escape(sub1, quote=False)
-
-    st_after = await state.get_state()
-    sdata2 = await state.get_data()
-    mode_after = sdata2.get("mode")
-    reply_kb: ReplyKeyboardMarkup | ReplyKeyboardRemove
-    if st_after == Form.in_session.state and mode_after in ("cpa", "ag"):
-        ag_b = sdata2.get("ag_by") if mode_after == "ag" else None
-        reply_kb = session_reply_keyboard(
-            mode=mode_after,
-            ag_by=ag_b if ag_b in ("inn", "surname") else None,
-        )
-    elif st_after == Form.ag_pick_field.state and mode_after == "ag":
-        reply_kb = session_reply_keyboard(mode="ag", ag_by=None)
-    else:
-        reply_kb = links_only_reply_keyboard()
-
-    await message.answer(
-        f"Банк: <b>{esc_name}</b>\nSub1: <code>{esc_sub}</code>\n\n"
-        f'<a href="{esc_url}">Открыть ссылку</a>\n<code>{esc_url}</code>',
-        parse_mode="HTML",
-        disable_web_page_preview=True,
-        reply_markup=reply_kb,
+    await _send_built_link(
+        message,
+        state,
+        kind=kind,  # type: ignore[arg-type]
+        name=name,
+        rate=rate,
+        sub1=sub1,
+        url=url,
     )
 
 
 @router.message(LinksButtonFilter())
 async def on_links_button(message: Message, state: FSMContext) -> None:
-    await show_links_flow(message, state)
+    await show_offer_links_flow(message, state, "bank")
+
+
+@router.message(MfoLinksButtonFilter())
+async def on_mfo_links_button(message: Message, state: FSMContext) -> None:
+    await show_offer_links_flow(message, state, "mfo")
 
 
 @router.message(Command("links"))
 async def cmd_links(message: Message, state: FSMContext) -> None:
-    await show_links_flow(message, state)
+    await show_offer_links_flow(message, state, "bank")
 
 
-@router.callback_query(F.data.startswith("lnk:"))
-async def on_pick_bank_for_link(cb: CallbackQuery, state: FSMContext) -> None:
+@router.message(Command("mfo"))
+async def cmd_mfo(message: Message, state: FSMContext) -> None:
+    await show_offer_links_flow(message, state, "mfo")
+
+
+@router.callback_query(F.data.regexp(r"^lnk:[bm]:\d+$"))
+async def on_pick_offer_for_link(cb: CallbackQuery, state: FSMContext) -> None:
     if not cb.message:
         await cb.answer()
         return
-    part = (cb.data or "").removeprefix("lnk:")
-    if not part.isdigit():
+    parts = (cb.data or "").split(":")
+    if len(parts) != 3:
         await cb.answer()
         return
-    idx = int(part)
-    banks = load_banks()
-    if idx < 0 or idx >= len(banks):
-        await cb.answer("Обнови список банков в banks.json", show_alert=True)
+    kind_char, idx_str = parts[1], parts[2]
+    if kind_char not in ("b", "m") or not idx_str.isdigit():
+        await cb.answer()
+        return
+    kind: OfferKind = "bank" if kind_char == "b" else "mfo"
+    idx = int(idx_str)
+    offers = load_offers(kind)
+    if idx < 0 or idx >= len(offers):
+        await cb.answer("Обнови список в JSON", show_alert=True)
         return
     prev = await state.get_state()
-    b = banks[idx]
+    offer = offers[idx]
+    rate = offer.get("rate", "")
+    kind_human = "Банк" if kind == "bank" else "МФО"
+    rate_line = f"\nСтавка: <b>{html.escape(rate, quote=False)}</b>" if rate else ""
     await state.update_data(
         _restore_state_after_link=prev,
-        link_bank_idx=idx,
-        link_bank_name=b["name"],
+        link_kind=kind,
+        link_idx=idx,
+        link_name=offer["name"],
+        link_rate=rate,
     )
     await state.set_state(Form.waiting_sub1_for_link)
     await cb.message.answer(
-        f"Банк: <b>{html.escape(b['name'], quote=False)}</b>\n"
-        "Введи <b>Sub1</b> — подставлю в ссылку (или «Сменить режим» чтобы выйти).",
+        f"{kind_human}: <b>{html.escape(offer['name'], quote=False)}</b>{rate_line}\n"
+        "Введи <b>Sub1</b> — подставлю в ссылку.",
         parse_mode="HTML",
     )
     await cb.answer()
@@ -380,8 +467,8 @@ async def cmd_mode(message: Message, state: FSMContext) -> None:
     await message.answer("Сессия сброшена.", reply_markup=ReplyKeyboardRemove())
     await message.answer("Выбери режим:", reply_markup=mode_keyboard())
     await message.answer(
-        f"Ссылки: «{html.escape(LINKS_BTN)}» или <code>/links</code>.",
-        reply_markup=links_only_reply_keyboard(),
+        f"Ссылки: «{html.escape(LINKS_BTN)}» / «{html.escape(MFO_LINKS_BTN)}».",
+        reply_markup=links_menu_reply_keyboard(),
         parse_mode="HTML",
     )
 
@@ -619,6 +706,12 @@ async def on_lookup_session(message: Message, state: FSMContext) -> None:
         await state.clear()
         await message.answer("Режим сброшен.", reply_markup=ReplyKeyboardRemove())
         await message.answer("Выбери режим:", reply_markup=mode_keyboard())
+        return
+    if _is_links_btn(raw):
+        await show_offer_links_flow(message, state, "bank")
+        return
+    if _is_mfo_links_btn(raw):
+        await show_offer_links_flow(message, state, "mfo")
         return
 
     sdata: dict[str, Any] = await state.get_data()

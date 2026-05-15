@@ -1,0 +1,54 @@
+{
+  "mfo": [
+    {
+      "name": "Займер",
+      "rate": "4425 ₽",
+      "url_template": "https://t.fincpanetwork.ru/click/24568/15/?erid=2W5zFHwA2h6?sub1={sub1}"
+    },
+    {
+      "name": "MoneyMan",
+      "rate": "3700 ₽",
+      "url_template": "https://trk.ppdu.ru/click?uid=321413&oid=1253&erid=2SDnjdTrs6M?sub1={sub1}"
+    },
+    {
+      "name": "Быстроденьги",
+      "rate": "4194 ₽",
+      "url_template": "https://t.fincpanetwork.ru/click/24568/613/?erid=LjN8JtHPe?sub1={sub1}"
+    },
+    {
+      "name": "МигКредит",
+      "rate": "4185 ₽",
+      "url_template": "https://t.fincpanetwork.ru/click/24568/450/?erid=2W5zFHt2Zms?sub1={sub1}"
+    },
+    {
+      "name": "А-Деньги",
+      "rate": "3000 ₽",
+      "url_template": "https://trk.ppdu.ru/click?uid=321413&oid=1924&erid=2SDnjeV7aM9?sub1={sub1}"
+    },
+    {
+      "name": "MaxCredit",
+      "rate": "4400 ₽",
+      "url_template": "https://trk.ppdu.ru/click?uid=321413&oid=1062&erid=2SDnjbuHuCz?sub1={sub1}"
+    },
+    {
+      "name": "Умные наличные",
+      "rate": "4400 ₽",
+      "url_template": "https://trk.ppdu.ru/click?uid=321413&oid=2259&erid=2SDnjebTPH3&sub1={sub1}&siteId=18278"
+    },
+    {
+      "name": "Свои Люди",
+      "rate": "2700 ₽",
+      "url_template": "https://trk.ppdu.ru/click?uid=321413&oid=1728&erid=2SDnjd2dyNy?sub1={sub1}"
+    },
+    {
+      "name": "Срочно Деньги",
+      "rate": "2400 ₽",
+      "url_template": "https://trk.ppdu.ru/click?uid=321413&oid=1701&erid=2SDnjeVT5Gb?sub1={sub1}"
+    },
+    {
+      "name": "RocketMan",
+      "rate": "2600 ₽",
+      "url_template": "https://trk.ppdu.ru/click?uid=321413&oid=1843&erid=2SDnjdR3AZv?sub1={sub1}"
+    }
+  ]
+}

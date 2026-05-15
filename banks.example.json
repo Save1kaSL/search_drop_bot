@@ -2,27 +2,8 @@
   "banks": [
     {
       "name": "ОТП Банк РКО",
+      "rate": "8500 ₽",
       "url_template": "https://rko-group.ru/s/tD5hlGHO?sub1={sub1}"
-    },
-    {
-      "name": "OZON Банк РКО",
-      "url_template": "https://rko-group.ru/s/8azLeKbJ?sub1={sub1}"
-    },
-    {
-      "name": "ЛОКО Банк РКО",
-      "url_template": "https://rko-group.ru/s/ZJWmXohL?sub1={sub1}"
-    },
-    {
-      "name": "БСПБ Банк РКО",
-      "url_template": "https://rko-group.ru/s/SqMOH0Wm?sub1={sub1}"
-    },
-    {
-      "name": "Контур Банк РКО",
-      "url_template": "https://rko-group.ru/s/qknoo2YF?sub1={sub1}"
-    },
-    {
-      "name": "Свой Банк РКО",
-      "url_template": "https://rko-group.ru/s/ub6qvums?sub1={sub1}"
     }
   ]
 }

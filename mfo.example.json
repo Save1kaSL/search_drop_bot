@@ -1,0 +1,9 @@
+{
+  "mfo": [
+    {
+      "name": "Пример МФО",
+      "rate": "1500 ₽",
+      "url_template": "https://example.com/click?sub1={sub1}"
+    }
+  ]
+}
